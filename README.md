@@ -1,2 +1,5 @@
-# grow-10x-ai-automation
-Local-first AI content automation app with n8n, Postiz, Grok
+# Grow 10x With AI Automation
+
+Complete local-first blueprint.
+
+See docs for full architecture.
