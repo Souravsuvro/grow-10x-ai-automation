@@ -1,1 +1,1 @@
-export default function Home() { return <h1>Grow 10x Dashboard</h1>; }
+export default function Dashboard() { return ( <div><h1>Grow 10x AI Automation Dashboard</h1><p>Full local-first app ready. Check GitHub for blueprints, n8n workflows, prompts.</p><ul><li>Multi-client support</li><li>Grok repurposing</li><li>Postiz scheduling</li></ul></div> ); }
