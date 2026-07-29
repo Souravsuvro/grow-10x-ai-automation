@@ -1,0 +1,156 @@
+{
+  "name": "Grow 10x — Repurpose to Postiz",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "grow-10x-repurpose",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "grow-10x-repurpose"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.headers['x-webhook-secret'] || $json.headers['X-Webhook-Secret'] || '' }}",
+              "operation": "equal",
+              "value2": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+            }
+          ]
+        }
+      },
+      "id": "check-secret",
+      "name": "Check Webhook Secret",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [240, 0],
+      "notes": "If N8N_WEBHOOK_SECRET is empty, both sides are empty and the check passes."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $env.XAI_MODEL || 'grok-2-latest' }}\",\n  \"temperature\": 0.7,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You repurpose marketing content into platform-specific social posts. Always respond with valid JSON only containing posts[] and optional summary.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Client: {{ $json.body.client.name }}\\nTone: {{ $json.body.client.brandVoice.tone }}\\nAudience: {{ $json.body.client.brandVoice.audience }}\\nGuidelines: {{ $json.body.client.brandVoice.guidelines }}\\nPlatforms: {{ $json.body.client.platforms.filter(p => p.enabled).map(p => p.platform).join(', ') }}\\n\\nSOURCE:\\n# {{ $json.body.content.title }}\\n\\n{{ $json.body.content.body }}\\n\\nReturn JSON: { posts: [{ platform, content, hashtags?, cta?, title? }], summary? }\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "grok-http",
+      "name": "Grok Repurpose",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, -80],
+      "notes": "Configure Header Auth credential with Authorization: Bearer <XAI_API_KEY>"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $('Webhook').item.json.body || $('Webhook').item.json;\nconst client = root.client;\nconst grok = items[0].json;\nconst text = grok.choices?.[0]?.message?.content || '';\nlet parsed;\ntry {\n  parsed = JSON.parse(text);\n} catch (e) {\n  const m = text.match(/\\{[\\s\\S]*\\}/);\n  if (!m) throw new Error('Grok did not return JSON');\n  parsed = JSON.parse(m[0]);\n}\nconst integrationMap = Object.fromEntries(\n  (client.platforms || [])\n    .filter((p) => p.enabled && p.postizIntegrationId)\n    .map((p) => [p.platform, p.postizIntegrationId])\n);\nconst posts = (parsed.posts || [])\n  .map((post) => {\n    const id = integrationMap[post.platform];\n    if (!id) return null;\n    let content = post.content || '';\n    if (post.hashtags?.length) {\n      content += '\\n\\n' + post.hashtags.map((h) => (h.startsWith('#') ? h : '#' + h)).join(' ');\n    }\n    if (post.cta) content += '\\n\\n' + post.cta;\n    const settings = { __type: post.platform };\n    if (post.platform === 'x') settings.who_can_reply_post = 'everyone';\n    if (post.platform === 'instagram') settings.post_type = 'post';\n    if (post.platform === 'youtube') {\n      settings.title = post.title || root.content.title;\n      settings.type = 'public';\n      settings.selfDeclaredMadeForKids = 'no';\n    }\n    return {\n      integration: { id },\n      value: [{ content, image: [] }],\n      settings,\n    };\n  })\n  .filter(Boolean);\n\nconst when = new Date(Date.now() + 60 * 60 * 1000).toISOString();\nreturn [{\n  json: {\n    contentId: root.contentId || root.content?.id,\n    summary: parsed.summary || '',\n    postizBody: {\n      type: 'schedule',\n      date: when,\n      shortLink: false,\n      tags: [],\n      posts,\n    },\n  },\n}];"
+      },
+      "id": "map-posts",
+      "name": "Map to Postiz Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [740, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.POSTIZ_BASE_URL || 'http://host.docker.internal:4007').replace(/\\/$/, '') + '/public/v1/posts' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $env.POSTIZ_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.postizBody }}",
+        "options": {}
+      },
+      "id": "postiz-http",
+      "name": "Postiz Schedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [980, -80],
+      "notes": "Set POSTIZ_BASE_URL and POSTIZ_API_KEY in n8n env. Prefer n8n-nodes-postiz community node when available."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, contentId: $('Map to Postiz Payload').item.json.contentId, summary: $('Map to Postiz Payload').item.json.summary, postiz: $json } }}",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1220, -80]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, error: 'Unauthorized webhook secret' } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "respond-401",
+      "name": "Respond 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [500, 120]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Check Webhook Secret", "type": "main", "index": 0 }]]
+    },
+    "Check Webhook Secret": {
+      "main": [
+        [{ "node": "Grok Repurpose", "type": "main", "index": 0 }],
+        [{ "node": "Respond 401", "type": "main", "index": 0 }]
+      ]
+    },
+    "Grok Repurpose": {
+      "main": [[{ "node": "Map to Postiz Payload", "type": "main", "index": 0 }]]
+    },
+    "Map to Postiz Payload": {
+      "main": [[{ "node": "Postiz Schedule", "type": "main", "index": 0 }]]
+    },
+    "Postiz Schedule": {
+      "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {},
+  "versionId": "1",
+  "triggerCount": 0,
+  "tags": [
+    {
+      "name": "grow-10x"
+    }
+  ]
+}

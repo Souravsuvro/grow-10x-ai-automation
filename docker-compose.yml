@@ -1,21 +1,50 @@
 services:
   n8n:
-    image: n8nio/n8n
+    image: n8nio/n8n:latest
+    container_name: grow10x-n8n
+    restart: unless-stopped
     ports:
       - "5678:5678"
-    volumes:
-      - n8n_data:/home/node/.n8n
     environment:
       - N8N_HOST=localhost
       - N8N_PORT=5678
-
-  postiz:
-    image: postiz/postiz
-    ports:
-      - "3000:3000"
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=UTC
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+      # Install Postiz community node on first start (optional)
+      - N8N_REINSTALL_MISSING_PACKAGES=true
     volumes:
-      - postiz_data:/app/data
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # Lightweight Postgres for optional local tools / future use.
+  # Full Postiz stack needs Temporal — see README (official postiz-docker-compose).
+  postgres:
+    image: postgres:17-alpine
+    container_name: grow10x-postgres
+    restart: unless-stopped
+    profiles: [ "db" ]
+    environment:
+      POSTGRES_USER: grow10x
+      POSTGRES_PASSWORD: grow10x
+      POSTGRES_DB: grow10x
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U grow10x -d grow10x" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   n8n_data:
-  postiz_data:
+  postgres_data:

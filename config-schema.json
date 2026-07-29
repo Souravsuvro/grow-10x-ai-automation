@@ -1,1 +1,131 @@
-{}
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Grow10xClientConfig",
+  "description": "Per-client brand voice, channels, and Postiz integration mapping",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "brandVoice",
+    "platforms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable client identifier (UUID)"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "URL-friendly slug"
+    },
+    "brandVoice": {
+      "type": "object",
+      "required": [
+        "tone",
+        "audience",
+        "guidelines"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tone": {
+          "type": "string",
+          "description": "e.g. bold, professional, playful"
+        },
+        "audience": {
+          "type": "string",
+          "description": "Who the content is for"
+        },
+        "guidelines": {
+          "type": "string",
+          "description": "Do/don't rules, banned phrases, CTA style"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30
+        }
+      }
+    },
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "platform",
+          "enabled"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "x",
+              "linkedin",
+              "instagram",
+              "threads",
+              "tiktok",
+              "youtube",
+              "facebook",
+              "bluesky",
+              "reddit"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "postizIntegrationId": {
+            "type": "string",
+            "description": "Postiz channel/integration ID for this platform"
+          },
+          "handle": {
+            "type": "string",
+            "description": "Optional public handle for reference"
+          }
+        }
+      }
+    },
+    "scheduleDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "default": "UTC"
+        },
+        "preferredHours": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23
+          },
+          "description": "Preferred UTC hours to schedule"
+        },
+        "autoSchedule": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, push drafts to Postiz automatically after repurpose"
+        }
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
