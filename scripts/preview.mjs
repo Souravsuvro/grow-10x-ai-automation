@@ -11,7 +11,6 @@
  */
 import { spawn } from "node:child_process";
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -280,12 +279,24 @@ async function stop(announce = true) {
 }
 
 function stagePgliteAssets() {
+  // Never stage PGLite into serverless runtime paths such as
+  // `.vercel/output/functions/__server.func/_libs`; those paths are not writable
+  // and can trigger ENOENT errors like `/var/task/_libs/pglite.data`.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    console.warn("[preview] skipping PGLite asset staging in serverless mode");
+    return;
+  }
+
   const dest = join(ROOT, ".vercel/output/functions/__server.func/_libs");
   const src = join(ROOT, "node_modules/@electric-sql/pglite/dist");
   if (!existsSync(dest) || !existsSync(src)) return;
   for (const name of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
     const from = join(src, name);
-    if (existsSync(from)) copyFileSync(from, join(dest, name));
+    if (existsSync(from)) {
+      const target = join(dest, name);
+      mkdirSync(dirname(target), { recursive: true });
+      require("node:fs").copyFileSync(from, target);
+    }
   }
 }
 
