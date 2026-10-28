@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
@@ -17,6 +19,14 @@ const databaseUrl =
  * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
  */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
+
+function resolvePgliteDataDir(): string {
+  const override = process.env.PGLITE_DATA_DIR?.trim();
+  if (override) return override;
+  const fallbackBase =
+    process.env.TMPDIR ?? process.env.TMP ?? process.env.TEMP ?? "/tmp";
+  return join(fallbackBase, "grow-10x-ai-automation-pglite");
+}
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
@@ -111,7 +121,10 @@ async function createPgliteSql(): Promise<Sql> {
   // data survives source edits (it resets on dev-server restart).
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
+    const dataDir = resolvePgliteDataDir();
+    mkdirSync(dataDir, { recursive: true });
     const pg = new PGlite({
+      dataDir,
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,
