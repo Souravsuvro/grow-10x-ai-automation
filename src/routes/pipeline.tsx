@@ -12,15 +12,30 @@ export const Route = createFileRoute("/pipeline")({
   component: PipelinePage,
 });
 
+const PLATFORMS = [
+  ["linkedin", "LinkedIn"],
+  ["instagram", "Instagram"],
+  ["x", "X"],
+  ["facebook", "Facebook"],
+  ["tiktok", "TikTok"],
+  ["youtube", "YouTube"],
+] as const;
+
 function PipelinePage() {
   const data = Route.useLoaderData();
   const router = useRouter();
   const intake = useServerFn(intakeContent);
   const decide = useServerFn(setApproval);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
 
   return (
     <Shell>
+      <div className="mb-6 max-w-2xl">
+        <p className="text-sm uppercase tracking-[0.16em] text-sage">Pipeline</p>
+        <h2 className="font-display text-4xl">Save the source, then approve it</h2>
+        <p className="mt-2 text-sm text-muted">Week will not queue a line until this piece is approved. Drafts writes the variants after that.</p>
+      </div>
       <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
         <Panel title="Intake">
           <form
@@ -41,6 +56,7 @@ function PipelinePage() {
                   },
                 });
                 event.currentTarget.reset();
+                setNote("Source saved. Approve it before Drafts can queue it.");
                 await router.invalidate();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Intake failed");
@@ -59,21 +75,30 @@ function PipelinePage() {
             </label>
             <label className="grid gap-1 text-sm text-muted">
               Topic
-              <input name="topic" required className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg" />
+              <input name="topic" required placeholder="Same-week cleanings" className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg" />
             </label>
             <label className="grid gap-1 text-sm text-muted">
               Platform
               <select name="platform" className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg">
-                {["linkedin", "instagram", "x", "facebook", "tiktok", "youtube"].map((p) => (
-                  <option key={p}>{p}</option>
+                {PLATFORMS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
                 ))}
               </select>
             </label>
             <label className="grid gap-1 text-sm text-muted">
               Source
-              <textarea name="raw" required rows={6} className="rounded-lg border border-line bg-bg px-3 py-2 text-fg" />
+              <textarea
+                name="raw"
+                required
+                rows={6}
+                placeholder="Paste the real offer. Leave out prices you have not confirmed."
+                className="rounded-lg border border-line bg-bg px-3 py-2 text-fg"
+              />
             </label>
             {error && <p className="text-sm text-brass">{error}</p>}
+            {note && <p className="text-sm text-sage">{note}</p>}
             <button type="submit" className="min-h-11 rounded-full bg-brass px-4 text-sm font-medium text-ink">
               Save source
             </button>
@@ -81,6 +106,7 @@ function PipelinePage() {
         </Panel>
         <Panel title="Pieces">
           <ul className="space-y-5">
+            {data.items.length === 0 && <p className="text-sm text-muted">No pieces yet. Save a source on the left.</p>}
             {data.items.map((item) => (
               <li key={item.id} className="border-b border-line pb-4 last:border-0">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -94,9 +120,17 @@ function PipelinePage() {
                 <div className="mt-3 flex gap-2">
                   <button
                     type="button"
-                    className="min-h-11 rounded-full border border-line px-4 text-sm text-fg"
+                    className={`min-h-11 rounded-full px-4 text-sm ${
+                      item.approval_status === "approved" ? "bg-brass font-medium text-ink" : "border border-line text-fg"
+                    }`}
                     onClick={() => {
-                      void decide({ data: { contentId: item.id, decision: "approved" } }).then(() => router.invalidate());
+                      setError("");
+                      void decide({ data: { contentId: item.id, decision: "approved" } })
+                        .then(() => {
+                          setNote("Approved. Open Drafts to write the variants.");
+                          return router.invalidate();
+                        })
+                        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not approve"));
                     }}
                   >
                     Approve
@@ -105,7 +139,13 @@ function PipelinePage() {
                     type="button"
                     className="min-h-11 rounded-full border border-line px-4 text-sm text-muted"
                     onClick={() => {
-                      void decide({ data: { contentId: item.id, decision: "pending" } }).then(() => router.invalidate());
+                      setError("");
+                      void decide({ data: { contentId: item.id, decision: "pending" } })
+                        .then(() => {
+                          setNote("Held. Week will not queue this until you approve it again.");
+                          return router.invalidate();
+                        })
+                        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not hold"));
                     }}
                   >
                     Hold

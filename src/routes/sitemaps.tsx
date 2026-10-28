@@ -29,28 +29,46 @@ ${body}
 
 function escapeXml(value: string) {
   return value
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">");
+    .replace(/&/g, "\u0026amp;")
+    .replace(/</g, "\u0026lt;")
+    .replace(/>/g, "\u0026gt;");
 }
 
 function SitemapPage() {
   const images = Route.useLoaderData();
   const [xml, setXml] = useState("");
+  const [note, setNote] = useState("");
   return (
     <Shell>
       <Panel title="Image sitemap">
         <p className="mb-4 max-w-2xl text-sm text-muted">
-          Built from stored image records. Google expects absolute URLs, a title, and a caption. This file is
-          generated here so you can paste it into Search Console.
+          Built from stored image records. Google expects absolute URLs, a title, and a caption. Copy the file into Search Console. This page does not submit it.
         </p>
-        <button
-          type="button"
-          className="min-h-11 rounded-full bg-brass px-4 text-sm font-medium text-ink"
-          onClick={() => setXml(xmlFor(window.location.origin, images))}
-        >
-          Build sitemap
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="min-h-11 rounded-full bg-brass px-4 text-sm font-medium text-ink"
+            onClick={() => {
+              setXml(xmlFor(window.location.origin, images));
+              setNote("");
+            }}
+          >
+            Build sitemap
+          </button>
+          {xml && (
+            <button
+              type="button"
+              className="min-h-11 rounded-full border border-line px-4 text-sm text-fg"
+              onClick={() => {
+                void navigator.clipboard.writeText(xml).then(() => setNote("Sitemap copied."));
+              }}
+            >
+              Copy XML
+            </button>
+          )}
+        </div>
+        {note && <p className="mt-3 text-sm text-sage">{note}</p>}
+        {images.length === 0 && <p className="mt-6 text-sm text-muted">No image records yet.</p>}
         <ul className="mt-6 grid gap-3 sm:grid-cols-3">
           {images.map((image) => (
             <li key={image.id} className="overflow-hidden rounded-lg border border-line">

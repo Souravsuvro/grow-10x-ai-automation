@@ -11,7 +11,7 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
-      { name: "description", content: "Collect, draft, approve, and schedule client social content with Grok." },
+      { name: "description", content: "Ask Grow 10x to draft, review, and fix a client site, then approve posts before they are queued." },
       { name: "theme-color", content: "#101410" },
     ],
     links: [

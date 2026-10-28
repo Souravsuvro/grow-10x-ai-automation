@@ -30,9 +30,10 @@ function ClientsPage() {
           platforms: String(form.get("platforms") ?? ""),
         },
       });
-      await router.invalidate();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
+      return false;
     } finally {
       setPending(false);
     }
@@ -40,6 +41,11 @@ function ClientsPage() {
 
   return (
     <Shell>
+      <div className="mb-6 max-w-2xl">
+        <p className="text-sm uppercase tracking-[0.16em] text-sage">Studios</p>
+        <h2 className="font-display text-4xl">Who the desk is writing for</h2>
+        <p className="mt-2 text-sm text-muted">Name, place, and voice travel into every draft. Do not store a private contact list here.</p>
+      </div>
       <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <Panel title="Studios">
           <ul className="space-y-4">
@@ -60,8 +66,12 @@ function ClientsPage() {
             className="grid gap-3"
             onSubmit={(event) => {
               event.preventDefault();
-              void onSubmit(new FormData(event.currentTarget));
-              event.currentTarget.reset();
+              const form = event.currentTarget;
+              void onSubmit(new FormData(form)).then((ok) => {
+                if (!ok) return;
+                form.reset();
+                return router.invalidate();
+              });
             }}
           >
             <Field name="business_name" label="Business" placeholder="Northline Dental" />
@@ -93,7 +103,7 @@ function Field({ name, label, placeholder }: { name: string; label: string; plac
         name={name}
         required
         placeholder={placeholder}
-        className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg outline-none focus:border-brass"
+        className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
       />
     </label>
   );

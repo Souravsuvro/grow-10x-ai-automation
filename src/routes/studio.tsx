@@ -1,4 +1,4 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Shell, Panel } from "@/components/shell";
@@ -18,6 +18,9 @@ function StudioPage() {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [contentId, setContentId] = useState(data.items[0]?.id ?? 0);
+  const selected = data.items.find((item) => item.id === contentId);
+  const visible = data.drafts.filter((draft) => draft.content_id === contentId);
+  const approved = selected?.approval_status === "approved";
 
   return (
     <Shell>
@@ -39,6 +42,9 @@ function StudioPage() {
               </option>
             ))}
           </select>
+          {selected && (
+            <p className="mt-2 text-xs uppercase tracking-wide text-brass">{selected.approval_status}</p>
+          )}
         </label>
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
@@ -74,30 +80,47 @@ function StudioPage() {
         </button>
       </div>
       {note && <p className="mb-4 text-sm text-muted">{note}</p>}
+      {data.items.length === 0 && (
+        <p className="mb-4 text-sm text-muted">
+          Nothing to draft yet. <Link to="/pipeline" className="text-brass">Save a source in Pipeline</Link> first.
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-3">
-        {data.drafts
-          .filter((draft) => draft.content_id === contentId || data.drafts.every((d) => d.content_id !== contentId))
-          .slice(0, 6)
-          .map((draft) => (
+        {visible.length === 0 && contentId > 0 && (
+          <p className="text-sm text-muted md:col-span-3">No variants for this source yet. Draft with Grok, then approve the piece before you queue it.</p>
+        )}
+        {visible.slice(0, 6).map((draft) => (
             <Panel key={draft.id} title={`${draft.variant_label} · ${draft.platform}`}>
               {draft.recommended && <p className="mb-2 text-xs uppercase tracking-wide text-sage">Recommended</p>}
               <p className="text-sm text-fg">{draft.copy}</p>
               <p className="mt-3 text-sm text-muted">
-                {draft.suggested_time} · SEO {draft.seo_score}
+                {draft.suggested_time} · score {draft.seo_score}
               </p>
               <p className="mt-1 text-sm text-muted">{draft.notes}</p>
-              <button
-                type="button"
-                className="mt-4 min-h-11 rounded-full border border-line px-4 text-sm text-fg"
-                onClick={() => {
-                  void queue({ data: { draftId: draft.id, dayOffset: 1 } })
-                    .then(() => setNote("Queued for tomorrow. Approve the piece first if this fails."))
-                    .then(() => router.invalidate())
-                    .catch((err: unknown) => setNote(err instanceof Error ? err.message : "Could not queue"));
-                }}
-              >
-                Queue tomorrow
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="min-h-11 rounded-full border border-line px-4 text-sm text-fg"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(draft.copy).then(() => setNote("Variant copied."));
+                  }}
+                >
+                  Copy
+                </button>
+                <button
+                  type="button"
+                  disabled={!approved}
+                  className="min-h-11 rounded-full border border-line px-4 text-sm text-fg disabled:opacity-50"
+                  onClick={() => {
+                    void queue({ data: { draftId: draft.id, dayOffset: 1 } })
+                      .then(() => setNote("Queued for tomorrow."))
+                      .then(() => router.invalidate())
+                      .catch((err: unknown) => setNote(err instanceof Error ? err.message : "Could not queue"));
+                  }}
+                >
+                  {approved ? "Queue tomorrow" : "Approve first"}
+                </button>
+              </div>
             </Panel>
           ))}
       </div>
