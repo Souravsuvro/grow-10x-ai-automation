@@ -30,6 +30,16 @@ const TOOLS = [
     prompt: "Turn this enquiry into a short HubSpot note: what they asked, the next step, and what we do not know yet.",
   },
   {
+    name: "Gmail",
+    use: "Drafts stay here. You send from Gmail yourself. Contacts are never imported.",
+    prompt: "Draft one follow-up email I will send myself. Use {{first_name}}. Do not ask for a contact list. Do not say it was sent. Offer:\n",
+  },
+  {
+    name: "Google Calendar",
+    use: "Care scripts can ask for a preferred time. Booking confirmation stays in your calendar app.",
+    prompt: "Draft a booking reply that asks for name, phone, preferred time, and location. Do not invent availability or confirm a booking.",
+  },
+  {
     name: "GitHub",
     use: "The website source lives in a repo. Chat can draft the page. It does not push code.",
     prompt: "Draft the homepage sections a developer can paste. Mark every fact that still needs a source.",
@@ -50,23 +60,33 @@ const TOOLS = [
     prompt: "Turn this brief into a one-page Notion outline: audience, offer, proof, and the page we should write next.",
   },
   {
-    name: "Ad accounts",
-    use: "Google, X, Apple, Microsoft, Yahoo, and YouTube stay in their own accounts. Chat writes the variants, the rewrite, the test, and a read of numbers you paste. It does not spend.",
-    prompt: "Create two ad variants. Name the platform I should paste them into. Hook, offer, proof, one call to action. Do not invent results. Offer:\n",
+    name: "Google Ads",
+    use: "Search and local intent variants, rewrites, tests, and a read of numbers you paste. Campaign creation stays in Google Ads.",
+    prompt: "Create two Google Ads search variants with local intent. Hook, offer, proof, one call to action. Do not invent results. Offer:\n",
   },
   {
-    name: "Meta",
-    use: "Facebook and Instagram copy is a draft. Nothing is published from this studio.",
-    prompt: "Create two Meta posts, one for Facebook and one for Instagram. Do not claim they are published. Offer:\n",
+    name: "Meta Ads",
+    use: "Facebook and Instagram copy and ad text are drafts. Nothing is published or spent from this studio.",
+    prompt: "Create two Meta ad variants for Facebook and Instagram. Hook, offer, proof, one call to action. Do not invent results. Offer:\n",
   },
   {
-    name: "Mail",
-    use: "Google Contacts, Apple Contacts, and lead lists are not imported. Chat drafts one email with a name placeholder. You send it from your own inbox or CRM.",
-    prompt: "Draft one follow-up email I will send myself. Use {{first_name}}. Do not ask for a contact list. Do not say it was sent. Offer:\n",
+    name: "Business listings",
+    use: "GBP, Apple Business Connect, and Bing Places copy is drafted here. You claim and edit listings in each portal.",
+    prompt: "Draft Google Business Profile copy: primary category, services, description under 750 characters, and three Q and A pairs. Flag missing hours, phone, or address. Do not invent NAP.",
   },
   {
-    name: "Reviews",
-    use: "An honest ask you send yourself. The desk never demands five stars or offers a reward for a review.",
+    name: "Care operator",
+    use: "Scripts for booking, price questions, delays, and after hours. A human or your own agent sends them.",
+    prompt: "Write a five-line care operator script for this studio: greeting, clarify need, collect details, next step, close. No invented offers.",
+  },
+  {
+    name: "SEO and GEO",
+    use: "Local keywords, article outlines, and technical checks. Rankings are never invented.",
+    prompt: "Outline one short article that could earn a citation in AI search: title, three section headings, and a FAQ of five questions. Prefer long-tail local commercial intent. Do not invent rankings.",
+  },
+  {
+    name: "Mail and reviews",
+    use: "Google Contacts and lead lists are not imported. Chat drafts one email or an honest review ask. You send it yourself.",
     prompt: "Draft a short honest review ask I will send myself. Do not demand five stars. Do not offer a discount, gift, or entry. Do not say a review was posted.",
   },
 ] as const;
@@ -85,7 +105,7 @@ function ConnectorsPage() {
     <Shell>
       <div className="mb-6 max-w-2xl">
         <p className="text-sm uppercase tracking-[0.16em] text-sage">Connect</p>
-        <h2 className="font-display text-4xl">Attach the tools beside this preview</h2>
+        <h2 className="font-display text-4xl">Tools beside the desk</h2>
         <p className="mt-2 text-sm text-muted">
           Keys stay in Grok. This studio never asks for a password, and it does not import an address book. Use a card to drop a starting prompt into Chat.
           {drive === "ready" ? " Google Drive is available in this preview." : " Google Drive is not attached in this preview yet."}
