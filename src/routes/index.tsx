@@ -23,7 +23,7 @@ function Home() {
           Ask the desk. Approve the line. Queue the week.
         </p>
         <p className="mt-3 max-w-xl text-sm text-muted">
-          Chat drafts pages, ads, research, and mail. You approve a line before the week can queue it. Nothing is posted from the desk.
+          Chat drafts website copy, SEO and GEO, business listings, leads, care scripts, Google and Meta ads, research, and outreach. You approve a line before the week can queue it. Nothing is posted or spent from the desk.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link to="/chat" className="inline-flex min-h-11 items-center rounded-full bg-brass px-4 text-sm font-medium text-ink">
@@ -33,6 +33,24 @@ function Home() {
             Connect tools
           </Link>
         </div>
+      </div>
+      <div className="mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          { label: "SEO and GEO", prompt: "Outline one short article that could earn a citation in AI search: title, three section headings, and a FAQ of five questions. Prefer long-tail local commercial intent. Do not invent rankings." },
+          { label: "Listings", prompt: "Draft Google Business Profile copy: primary category, services, description under 750 characters, and three Q and A pairs. Flag missing hours, phone, or address. Do not invent NAP." },
+          { label: "Leads", prompt: "Outline one lead magnet for this studio: title, who it helps, three sections, and the next step after download. Do not invent conversion rates." },
+          { label: "Care", prompt: "Write a five-line care operator script for this studio: greeting, clarify need, collect details, next step, close. No invented offers." },
+          { label: "Ads", prompt: "Create two Google Ads search variants with local intent. Hook, offer, proof, one call to action. Do not invent results. Offer:\n" },
+        ].map((desk) => (
+          <Link
+            key={desk.label}
+            to="/chat"
+            search={{ prompt: desk.prompt }}
+            className="rounded-[var(--radius)] border border-line bg-surface px-3 py-3 text-sm text-fg hover:border-brass"
+          >
+            {desk.label}
+          </Link>
+        ))}
       </div>
       <div className="grid gap-3 sm:grid-cols-4">
         {cards.map((card) => (
