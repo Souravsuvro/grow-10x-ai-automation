@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { requireUserId } from "@/lib/auth/verify.server";
 
 type ClientBits = {
   id: number;
@@ -94,10 +95,11 @@ async function askGrok(key: string, messages: { role: string; content: string }[
 }
 
 export const listChat = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   const threads = await sql<{ id: number; title: string; created_at: string }>`
     select id, title, created_at::text as created_at
-    from chat_threads
+    from chat_threads where owner_id = ${userId}
     order by id desc
     limit 1
   `;
@@ -115,11 +117,12 @@ export const listChat = createServerFn({ method: "GET" }).handler(async () => {
 export const newChat = createServerFn({ method: "POST" })
   .inputValidator((data: Record<string, unknown>) => data)
   .handler(async () => {
+  const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<{ id: number }>`
-      insert into chat_threads (title) values ('New chat') returning id
+      insert into chat_threads (owner_id, title) values (${userId}, 'New chat') returning id
     `;
-    await sql`insert into activity_logs (event, detail) values ('chat', 'New thread')`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'chat', 'New thread')`;
     return { threadId: rows[0]!.id };
   });
 
@@ -135,24 +138,25 @@ export const sendChat = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     let threadId = data.threadId;
     if (!threadId) {
       const rows = await sql<{ id: number }>`
-        insert into chat_threads (title) values (${data.text.slice(0, 60)}) returning id
+        insert into chat_threads (owner_id, title) values (${userId}, ${data.text.slice(0, 60)}) returning id
       `;
       threadId = rows[0]!.id;
     }
     const clients = data.clientId
       ? await sql<ClientBits>`
           select id, business_name, business_category, audience, locations, brand_voice
-          from clients where id = ${data.clientId}
+          from clients where id = ${data.clientId} and owner_id = ${userId}
         `
       : [];
     const client = clients[0] ?? null;
     const prior = await sql<{ role: string; content: string }>`
       select role, content from chat_messages
-      where thread_id = ${threadId}
+      where thread_id = ${threadId} and exists (select 1 from chat_threads t where t.id = chat_messages.thread_id and t.owner_id = ${userId})
       order by id desc
       limit 8
     `;
@@ -179,6 +183,6 @@ export const sendChat = createServerFn({ method: "POST" })
       (${threadId}, 'user', ${data.text}),
       (${threadId}, 'assistant', ${reply})
     `;
-    await sql`insert into activity_logs (event, detail) values ('chat', ${apiKey ? "Grok desk reply" : "Checklist reply, Grok unavailable"})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'chat', ${apiKey ? "Grok desk reply" : "Checklist reply, Grok unavailable"})`;
     return { threadId, model: apiKey ? "grok-4.5" : "pack" };
   });
