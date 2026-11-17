@@ -128,7 +128,7 @@ export const newChat = createServerFn({ method: "POST" })
 
 export const sendChat = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
-    const body = data as { text?: string; clientId?: number; threadId?: number };
+    const body = data as { text?: string; clientId?: number; threadId?: string };
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text || text.length > 4000) throw new Error("Message required (max 4000)");
     return {
