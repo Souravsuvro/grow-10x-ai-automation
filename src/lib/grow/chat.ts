@@ -97,7 +97,7 @@ async function askGrok(key: string, messages: { role: string; content: string }[
 export const listChat = createServerFn({ method: "GET" }).handler(async () => {
   const userId = await requireUserId();
   const sql = await getSql();
-  const threads = await sql<{ id: number; title: string; created_at: string }>`
+  const threads = await sql<{ id: string; title: string; created_at: string }>`
     select id, title, created_at::text as created_at
     from chat_threads where owner_id = ${userId}
     order by id desc
@@ -119,7 +119,7 @@ export const newChat = createServerFn({ method: "POST" })
   .handler(async () => {
   const userId = await requireUserId();
     const sql = await getSql();
-    const rows = await sql<{ id: number }>`
+    const rows = await sql<{ id: string }>`
       insert into chat_threads (owner_id, title) values (${userId}, 'New chat') returning id
     `;
     await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'chat', 'New thread')`;
@@ -134,7 +134,7 @@ export const sendChat = createServerFn({ method: "POST" })
     return {
       text,
       clientId: typeof body.clientId === "number" ? body.clientId : 0,
-      threadId: typeof body.threadId === "number" ? body.threadId : 0,
+      threadId: typeof body.threadId === "string" ? body.threadId : "",
     };
   })
   .handler(async ({ data }) => {
@@ -142,10 +142,13 @@ export const sendChat = createServerFn({ method: "POST" })
     const sql = await getSql();
     let threadId = data.threadId;
     if (!threadId) {
-      const rows = await sql<{ id: number }>`
+      const rows = await sql<{ id: string }>`
         insert into chat_threads (owner_id, title) values (${userId}, ${data.text.slice(0, 60)}) returning id
       `;
       threadId = rows[0]!.id;
+    } else {
+      const ownedThread = await sql<{ id: string }>`select id from chat_threads where id = ${threadId} and owner_id = ${userId}`;
+      if (!ownedThread[0]) throw new Error("Chat thread not found");
     }
     const clients = data.clientId
       ? await sql<ClientBits>`
@@ -174,9 +177,9 @@ export const sendChat = createServerFn({ method: "POST" })
         ])
       : offline(data.text, client);
 
-    const count = await sql<{ n: number }>`select count(*)::int as n from chat_messages where thread_id = ${threadId}`;
+    const count = await sql<{ n: number }>`select count(*)::int as n from chat_messages where thread_id = ${threadId} and exists (select 1 from chat_threads t where t.id = chat_messages.thread_id and t.owner_id = ${userId})`;
     if ((count[0]?.n ?? 0) === 0) {
-      await sql`update chat_threads set title = ${data.text.slice(0, 60)} where id = ${threadId}`;
+      await sql`update chat_threads set title = ${data.text.slice(0, 60)} where id = ${threadId} and owner_id = ${userId}`;
     }
     await sql`
       insert into chat_messages (thread_id, role, content) values
