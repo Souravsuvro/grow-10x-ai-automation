@@ -15,3 +15,6 @@ alter table chat_threads add column if not exists owner_id text;
 update chat_threads set owner_id = 'dev-user' where owner_id is null;
 alter table chat_threads alter column owner_id set not null;
 create index if not exists chat_threads_owner_idx on chat_threads (owner_id, id desc);
+
+-- chat_threads uses text identifiers; generate an opaque ID when creating a thread.
+alter table chat_threads alter column id set default gen_random_uuid()::text;
