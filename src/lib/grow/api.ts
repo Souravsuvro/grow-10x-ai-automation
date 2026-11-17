@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { requireUserId } from "@/lib/auth/verify.server";
 
 export type ClientRow = {
   id: number;
@@ -69,10 +70,11 @@ export type ImageRow = {
 const PLATFORMS = ["linkedin", "instagram", "x", "facebook", "tiktok", "youtube"] as const;
 
 export const listOverview = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   const [clients, byStatus, recent, logs] = await Promise.all([
-    sql<{ n: number }>`select count(*)::int as n from clients`,
-    sql<{ status: string; n: number }>`select status, count(*)::int as n from content_items group by status`,
+    sql<{ n: number }>`select count(*)::int as n from clients where owner_id = ${userId}`,
+    sql<{ status: string; n: number }>`select i.status, count(*)::int as n from content_items i join clients c on c.id = i.client_id where c.owner_id = ${userId} group by i.status`,
     sql<ContentRow>`
       select i.id, i.client_id, c.business_name, i.campaign, i.source_model, i.content_type,
              i.topic, i.raw_content, i.summary, i.status, i.platform, i.audience,
@@ -80,16 +82,17 @@ export const listOverview = createServerFn({ method: "GET" }).handler(async () =
              to_char(i.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
       from content_items i
       join clients c on c.id = i.client_id
+      where c.owner_id = ${userId}
       order by i.id desc
       limit 6
     `,
     sql<{ id: number; event: string; detail: string; created_at: string }>`
       select id, event, detail,
              to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
-      from activity_logs order by id desc limit 8
+      from activity_logs where owner_id = ${userId} order by id desc limit 8
     `,
   ]);
-  const queued = await sql<{ n: number }>`select count(*)::int as n from schedule_slots where status <> 'published'`;
+  const queued = await sql<{ n: number }>`select count(*)::int as n from schedule_slots s join clients c on c.id = s.client_id where c.owner_id = ${userId} and s.status <> 'published'`;
   return {
     clientCount: clients[0]?.n ?? 0,
     queued: queued[0]?.n ?? 0,
@@ -102,10 +105,11 @@ export const listOverview = createServerFn({ method: "GET" }).handler(async () =
 });
 
 export const listClients = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   return sql<ClientRow>`
     select id, slug, business_name, business_category, audience, locations, brand_voice, platforms
-    from clients order by id
+    from clients where owner_id = ${userId} order by id
   `;
 });
 
@@ -130,18 +134,20 @@ export const createClient = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<ClientRow>`
-      insert into clients (slug, business_name, business_category, audience, locations, brand_voice, platforms)
-      values (${data.slug}, ${data.business_name}, ${data.business_category}, ${data.audience}, ${data.locations}, ${data.brand_voice}, ${data.platforms})
-      on conflict (slug) do update set business_name = excluded.business_name
+      insert into clients (owner_id, slug, business_name, business_category, audience, locations, brand_voice, platforms)
+      values (${userId}, ${`${data.slug}-${userId.slice(-8)}`},  ${data.business_name}, ${data.business_category}, ${data.audience}, ${data.locations}, ${data.brand_voice}, ${data.platforms})
+      on conflict (slug) do update set business_name = excluded.business_name where clients.owner_id = excluded.owner_id
       returning id, slug, business_name, business_category, audience, locations, brand_voice, platforms
     `;
-    await sql`insert into activity_logs (event, detail) values ('client', ${`Added ${data.business_name}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'client', ${`Added ${data.business_name}`})`;
     return rows[0];
   });
 
 export const listContent = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   const items = await sql<ContentRow>`
     select i.id, i.client_id, c.business_name, i.campaign, i.source_model, i.content_type,
@@ -150,6 +156,7 @@ export const listContent = createServerFn({ method: "GET" }).handler(async () =>
            to_char(i.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
     from content_items i
     join clients c on c.id = i.client_id
+    where c.owner_id = ${userId}
     order by i.id desc
   `;
   const drafts = await sql<DraftRow>`
@@ -158,6 +165,7 @@ export const listContent = createServerFn({ method: "GET" }).handler(async () =>
     from drafts d
     join content_items i on i.id = d.content_id
     join clients c on c.id = i.client_id
+    where c.owner_id = ${userId}
     order by d.recommended desc, d.id desc
   `;
   return { items, drafts };
@@ -192,8 +200,9 @@ export const intakeContent = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
-    const client = await sql<ClientRow>`select id, audience, locations from clients where id = ${data.clientId}`;
+    const client = await sql<ClientRow>`select id, audience, locations from clients where id = ${data.clientId} and owner_id = ${userId}`;
     if (!client[0]) throw new Error("Client not found");
     const rows = await sql<{ id: number }>`
       insert into content_items
@@ -202,7 +211,7 @@ export const intakeContent = createServerFn({ method: "POST" })
         (${data.clientId}, ${data.campaign}, 'intake', ${data.contentType}, ${data.topic}, ${data.raw}, '', 'source', ${data.platform}, ${client[0].audience}, ${client[0].locations}, 'medium', 'pending')
       returning id
     `;
-    await sql`insert into activity_logs (event, detail) values ('intake', ${data.topic})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'intake', ${data.topic})`;
     return { id: rows[0].id };
   });
 
@@ -274,6 +283,7 @@ export const generateDrafts = createServerFn({ method: "POST" })
     return { contentId };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<ContentRow & { brand_voice: string; business_category: string }>`
       select i.id, i.client_id, c.business_name, c.brand_voice, c.business_category,
@@ -282,7 +292,7 @@ export const generateDrafts = createServerFn({ method: "POST" })
              to_char(i.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
       from content_items i
       join clients c on c.id = i.client_id
-      where i.id = ${data.contentId}
+      where i.id = ${data.contentId} and c.owner_id = ${userId}
     `;
     const item = rows[0];
     if (!item) throw new Error("Content not found");
@@ -348,9 +358,9 @@ export const generateDrafts = createServerFn({ method: "POST" })
     await sql`
       update content_items
       set status = 'drafted', summary = ${summary}, source_model = ${model}, approval_status = 'pending'
-      where id = ${item.id}
+      where id = ${item.id} and exists (select 1 from clients c where c.id = content_items.client_id and c.owner_id = ${userId})
     `;
-    await sql`insert into activity_logs (event, detail) values ('draft', ${`${model} drafted ${item.topic}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'draft', ${`${model} drafted ${item.topic}`})`;
     return { model, count: variants.length };
   });
 
@@ -363,6 +373,7 @@ export const setApproval = createServerFn({ method: "POST" })
     return { contentId, decision };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const status = data.decision === "approved" ? "approved" : "drafted";
     await sql`
@@ -370,7 +381,7 @@ export const setApproval = createServerFn({ method: "POST" })
       set approval_status = ${data.decision}, status = ${status}
       where id = ${data.contentId}
     `;
-    await sql`insert into activity_logs (event, detail) values ('approval', ${`#${data.contentId} ${data.decision}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'approval', ${`#${data.contentId} ${data.decision}`})`;
     return { ok: true };
   });
 
@@ -383,11 +394,12 @@ export const scheduleDraft = createServerFn({ method: "POST" })
     return { draftId, dayOffset };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const drafts = await sql<{ id: number; platform: string; client_id: number; approval_status: string }>`
       select d.id, d.platform, i.client_id, i.approval_status
-      from drafts d join content_items i on i.id = d.content_id
-      where d.id = ${data.draftId}
+      from drafts d join content_items i on i.id = d.content_id join clients c on c.id = i.client_id
+      where d.id = ${data.draftId} and c.owner_id = ${userId}
     `;
     const draft = drafts[0];
     if (!draft) throw new Error("Draft not found");
@@ -398,12 +410,13 @@ export const scheduleDraft = createServerFn({ method: "POST" })
       insert into schedule_slots (draft_id, client_id, platform, publish_at, status)
       values (${draft.id}, ${draft.client_id}, ${draft.platform}, ${when.toISOString()}, 'queued')
     `;
-    await sql`update content_items set status = 'scheduled' where id = (select content_id from drafts where id = ${draft.id})`;
-    await sql`insert into activity_logs (event, detail) values ('schedule', ${`Draft ${draft.id} queued`})`;
+    await sql`update content_items set status = 'scheduled' where id = (select d.content_id from drafts d join content_items i on i.id = d.content_id join clients c on c.id = i.client_id where d.id = ${draft.id} and c.owner_id = ${userId})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'schedule', ${`Draft ${draft.id} queued`})`;
     return { ok: true };
   });
 
 export const listSchedule = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   return sql<SlotRow>`
     select s.id, s.draft_id, s.client_id, s.platform, s.status,
@@ -413,6 +426,7 @@ export const listSchedule = createServerFn({ method: "GET" }).handler(async () =
     join clients c on c.id = s.client_id
     join drafts d on d.id = s.draft_id
     join content_items i on i.id = d.content_id
+    where c.owner_id = ${userId}
     order by s.publish_at
   `;
 });
@@ -424,37 +438,41 @@ export const markPublished = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
-    await sql`update schedule_slots set status = 'published' where id = ${data.id}`;
+    await sql`update schedule_slots s set status = 'published' from clients c where s.client_id = c.id and c.owner_id = ${userId} and s.id = ${data.id}`;
     await sql`
       update content_items set status = 'published', approval_status = 'approved'
       where id = (
-        select d.content_id from schedule_slots s join drafts d on d.id = s.draft_id where s.id = ${data.id}
+        select d.content_id from schedule_slots s join drafts d on d.id = s.draft_id join clients c on c.id = s.client_id where s.id = ${data.id} and c.owner_id = ${userId}
       )
     `;
-    await sql`insert into activity_logs (event, detail) values ('publish', ${`Slot ${data.id} marked published`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'publish', ${`Slot ${data.id} marked published`})`;
     return { ok: true };
   });
 
 export const analytics = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   const platforms = await sql<{ platform: string; n: number }>`
-    select platform, count(*)::int as n from content_items group by platform order by n desc
+    select i.platform, count(*)::int as n from content_items i join clients c on c.id = i.client_id where c.owner_id = ${userId} group by i.platform order by n desc
   `;
   const scores = await sql<{ platform: string; avg: number }>`
-    select platform, coalesce(round(avg(seo_score))::int, 0) as avg from drafts group by platform
+    select d.platform, coalesce(round(avg(d.seo_score))::int, 0) as avg from drafts d join content_items i on i.id = d.content_id join clients c on c.id = i.client_id where c.owner_id = ${userId} group by d.platform
   `;
   const funnel = await sql<{ status: string; n: number }>`
-    select status, count(*)::int as n from content_items group by status
+    select i.status, count(*)::int as n from content_items i join clients c on c.id = i.client_id where c.owner_id = ${userId} group by i.status
   `;
   return { platforms, scores, funnel };
 });
 
 export const listImages = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   return sql<ImageRow>`
     select a.id, a.title, a.caption, a.page_path, a.image_path, c.business_name
     from image_assets a join clients c on c.id = a.client_id
+    where c.owner_id = ${userId}
     order by a.id
   `;
 });
@@ -466,6 +484,7 @@ export const exportPrompt = createServerFn({ method: "POST" })
     return { contentId };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<{
       business_name: string;
@@ -480,7 +499,7 @@ export const exportPrompt = createServerFn({ method: "POST" })
       select c.business_name, c.business_category, i.audience, i.location_target, c.brand_voice,
              i.platform, i.topic, i.raw_content
       from content_items i join clients c on c.id = i.client_id
-      where i.id = ${data.contentId}
+      where i.id = ${data.contentId} and c.owner_id = ${userId}
     `;
     const item = rows[0];
     if (!item) throw new Error("Content not found");

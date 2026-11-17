@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { requireUserId } from "@/lib/auth/verify.server";
 
 const DESKS = ["research", "copy", "visual", "ads", "video", "social", "comments", "engage"] as const;
 type Desk = (typeof DESKS)[number];
@@ -95,6 +96,7 @@ async function xai(path: string, key: string, body?: unknown, method = "POST") {
 }
 
 export const listAssist = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
   return sql<AssistRun>`
     select r.id, r.desk, r.lane, r.prompt, r.result, r.media_url, r.media_kind, r.job_id, r.status,
@@ -102,6 +104,7 @@ export const listAssist = createServerFn({ method: "GET" }).handler(async () => 
            to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
     from assist_runs r
     join clients c on c.id = r.client_id
+    where c.owner_id = ${userId}
     order by r.id desc
     limit 12
   `;
@@ -121,10 +124,11 @@ export const runAssist = createServerFn({ method: "POST" })
     return { desk, lane, clientId, brief, aspect };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const clients = await sql<ClientBits>`
       select id, business_name, business_category, audience, locations, brand_voice
-      from clients where id = ${data.clientId}
+      from clients where id = ${data.clientId} and owner_id = ${userId}
     `;
     const client = clients[0];
     if (!client) throw new Error("Studio not found");
@@ -136,7 +140,7 @@ export const runAssist = createServerFn({ method: "POST" })
         values (${client.id}, ${data.desk}, 'free', ${data.brief}, ${result}, 'ready')
         returning id
       `;
-      await sql`insert into activity_logs (event, detail) values ('assist', ${`Free ${data.desk} pack for ${client.business_name}`})`;
+      await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Free ${data.desk} pack for ${client.business_name}`})`;
       return { id: rows[0].id, status: "ready" as const, lane: "free" as const };
     }
 
@@ -162,7 +166,7 @@ export const runAssist = createServerFn({ method: "POST" })
         values (${client.id}, 'visual', 'grok', ${prompt}, ${"Still from Grok Imagine. The link expires — download it if you want to keep it."}, ${url}, 'image', 'ready')
         returning id
       `;
-      await sql`insert into activity_logs (event, detail) values ('assist', ${`Still for ${client.business_name}`})`;
+      await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Still for ${client.business_name}`})`;
       return { id: rows[0].id, status: "ready" as const, lane: "grok" as const };
     }
 
@@ -188,7 +192,7 @@ export const runAssist = createServerFn({ method: "POST" })
         )
         returning id
       `;
-      await sql`insert into activity_logs (event, detail) values ('assist', ${`Clip started for ${client.business_name}`})`;
+      await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Clip started for ${client.business_name}`})`;
       return { id: rows[0].id, status: "pending" as const, lane: "grok" as const };
     }
 
@@ -208,7 +212,7 @@ export const runAssist = createServerFn({ method: "POST" })
       values (${client.id}, ${data.desk}, 'grok', ${data.brief}, ${text}, 'ready')
       returning id
     `;
-    await sql`insert into activity_logs (event, detail) values ('assist', ${`Grok ${data.desk} for ${client.business_name}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Grok ${data.desk} for ${client.business_name}`})`;
     return { id: rows[0].id, status: "ready" as const, lane: "grok" as const };
   });
 
@@ -219,11 +223,12 @@ export const pollAssistVideo = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const apiKey = process.env.XAI_API_KEY;
     if (!apiKey) throw new Error("Grok is not available in this environment");
     const sql = await getSql();
     const rows = await sql<{ job_id: string; status: string }>`
-      select job_id, status from assist_runs where id = ${data.id}
+      select r.job_id, r.status from assist_runs r join clients c on c.id = r.client_id where r.id = ${data.id} and c.owner_id = ${userId}
     `;
     const row = rows[0];
     if (!row?.job_id) throw new Error("No clip was started");
@@ -240,14 +245,14 @@ export const pollAssistVideo = createServerFn({ method: "POST" })
         update assist_runs
         set status = 'ready', media_url = ${body.video.url},
             result = ${"Clip from Grok Imagine. The link expires — download it if you want to keep it. Nothing was posted."}
-        where id = ${data.id}
+        where id = ${data.id} and exists (select 1 from clients c where c.id = assist_runs.client_id and c.owner_id = ${userId})
       `;
       return { status: "ready" as const };
     }
     if (body.status === "failed" || body.status === "expired") {
       const message = body.error?.message || (body.status === "expired" ? "Clip expired before it finished" : "Clip failed");
       await sql`
-        update assist_runs set status = 'failed', result = ${message} where id = ${data.id}
+        update assist_runs set status = 'failed', result = ${message} where id = ${data.id} and exists (select 1 from clients c where c.id = assist_runs.client_id and c.owner_id = ${userId})
       `;
       return { status: "failed" as const };
     }
@@ -261,6 +266,7 @@ export const sendAssistToPipeline = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<{
       client_id: number;
@@ -273,7 +279,7 @@ export const sendAssistToPipeline = createServerFn({ method: "POST" })
     }>`
       select r.client_id, r.desk, r.result, r.status, c.business_name, c.locations, c.audience
       from assist_runs r join clients c on c.id = r.client_id
-      where r.id = ${data.id}
+      where r.id = ${data.id} and c.owner_id = ${userId}
     `;
     const row = rows[0];
     if (!row) throw new Error("Run not found");
@@ -285,7 +291,7 @@ export const sendAssistToPipeline = createServerFn({ method: "POST" })
       values
         (${row.client_id}, 'bench', 'assist', 'text', ${topic}, ${row.result.slice(0, 8000)}, ${row.result.slice(0, 180)}, 'source', 'instagram', ${row.audience}, ${row.locations}, 'medium', 'pending')
     `;
-    await sql`insert into activity_logs (event, detail) values ('assist', ${`Filed ${row.desk} for ${row.business_name}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Filed ${row.desk} for ${row.business_name}`})`;
     return { ok: true };
   });
 
@@ -298,6 +304,7 @@ export const prepareShare = createServerFn({ method: "POST" })
     return { id };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     const rows = await sql<{
       client_id: number;
@@ -341,6 +348,6 @@ export const prepareShare = createServerFn({ method: "POST" })
         )
       `;
     }
-    await sql`insert into activity_logs (event, detail) values ('assist', ${`Share drafts for ${row.business_name}`})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'assist', ${`Share drafts for ${row.business_name}`})`;
     return { ok: true, contentId };
   });

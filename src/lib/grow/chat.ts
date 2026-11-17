@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { requireUserId } from "@/lib/auth/verify.server";
 
 type ClientBits = {
   id: number;
@@ -94,10 +95,11 @@ async function askGrok(key: string, messages: { role: string; content: string }[
 }
 
 export const listChat = createServerFn({ method: "GET" }).handler(async () => {
+  const userId = await requireUserId();
   const sql = await getSql();
-  const threads = await sql<{ id: number; title: string; created_at: string }>`
+  const threads = await sql<{ id: string; title: string; created_at: string }>`
     select id, title, created_at::text as created_at
-    from chat_threads
+    from chat_threads where owner_id = ${userId}
     order by id desc
     limit 1
   `;
@@ -115,44 +117,49 @@ export const listChat = createServerFn({ method: "GET" }).handler(async () => {
 export const newChat = createServerFn({ method: "POST" })
   .inputValidator((data: Record<string, unknown>) => data)
   .handler(async () => {
+  const userId = await requireUserId();
     const sql = await getSql();
-    const rows = await sql<{ id: number }>`
-      insert into chat_threads (title) values ('New chat') returning id
+    const rows = await sql<{ id: string }>`
+      insert into chat_threads (owner_id, title) values (${userId}, 'New chat') returning id
     `;
-    await sql`insert into activity_logs (event, detail) values ('chat', 'New thread')`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'chat', 'New thread')`;
     return { threadId: rows[0]!.id };
   });
 
 export const sendChat = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
-    const body = data as { text?: string; clientId?: number; threadId?: number };
+    const body = data as { text?: string; clientId?: number; threadId?: string };
     const text = typeof body.text === "string" ? body.text.trim() : "";
     if (!text || text.length > 4000) throw new Error("Message required (max 4000)");
     return {
       text,
       clientId: typeof body.clientId === "number" ? body.clientId : 0,
-      threadId: typeof body.threadId === "number" ? body.threadId : 0,
+      threadId: typeof body.threadId === "string" ? body.threadId : "",
     };
   })
   .handler(async ({ data }) => {
+    const userId = await requireUserId();
     const sql = await getSql();
     let threadId = data.threadId;
     if (!threadId) {
-      const rows = await sql<{ id: number }>`
-        insert into chat_threads (title) values (${data.text.slice(0, 60)}) returning id
+      const rows = await sql<{ id: string }>`
+        insert into chat_threads (owner_id, title) values (${userId}, ${data.text.slice(0, 60)}) returning id
       `;
       threadId = rows[0]!.id;
+    } else {
+      const ownedThread = await sql<{ id: string }>`select id from chat_threads where id = ${threadId} and owner_id = ${userId}`;
+      if (!ownedThread[0]) throw new Error("Chat thread not found");
     }
     const clients = data.clientId
       ? await sql<ClientBits>`
           select id, business_name, business_category, audience, locations, brand_voice
-          from clients where id = ${data.clientId}
+          from clients where id = ${data.clientId} and owner_id = ${userId}
         `
       : [];
     const client = clients[0] ?? null;
     const prior = await sql<{ role: string; content: string }>`
       select role, content from chat_messages
-      where thread_id = ${threadId}
+      where thread_id = ${threadId} and exists (select 1 from chat_threads t where t.id = chat_messages.thread_id and t.owner_id = ${userId})
       order by id desc
       limit 8
     `;
@@ -170,15 +177,15 @@ export const sendChat = createServerFn({ method: "POST" })
         ])
       : offline(data.text, client);
 
-    const count = await sql<{ n: number }>`select count(*)::int as n from chat_messages where thread_id = ${threadId}`;
+    const count = await sql<{ n: number }>`select count(*)::int as n from chat_messages where thread_id = ${threadId} and exists (select 1 from chat_threads t where t.id = chat_messages.thread_id and t.owner_id = ${userId})`;
     if ((count[0]?.n ?? 0) === 0) {
-      await sql`update chat_threads set title = ${data.text.slice(0, 60)} where id = ${threadId}`;
+      await sql`update chat_threads set title = ${data.text.slice(0, 60)} where id = ${threadId} and owner_id = ${userId}`;
     }
     await sql`
       insert into chat_messages (thread_id, role, content) values
       (${threadId}, 'user', ${data.text}),
       (${threadId}, 'assistant', ${reply})
     `;
-    await sql`insert into activity_logs (event, detail) values ('chat', ${apiKey ? "Grok desk reply" : "Checklist reply, Grok unavailable"})`;
+    await sql`insert into activity_logs (owner_id, event, detail) values (${userId}, 'chat', ${apiKey ? "Grok desk reply" : "Checklist reply, Grok unavailable"})`;
     return { threadId, model: apiKey ? "grok-4.5" : "pack" };
   });

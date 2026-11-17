@@ -195,7 +195,7 @@ function ChatPage() {
             if (busy) return;
             setBusy(true);
             setNote("");
-            void send({ data: { threadId: data.chat.thread?.id ?? 0, clientId, text: draft } })
+            void send({ data: { threadId: data.chat.thread?.id ?? "", clientId, text: draft } })
               .then((result) => {
                 setDraft("");
                 setNote(result.model === "grok-4.5" ? "" : "Saved a checklist because Grok is not available.");
